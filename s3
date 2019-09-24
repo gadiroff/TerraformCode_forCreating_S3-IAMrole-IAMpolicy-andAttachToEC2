@@ -1,0 +1,163 @@
+#############################################
+######                                 ######     
+######       Create EC2                ###### 
+######                                 ######
+#############################################
+
+resource "aws_instance" "app01" {
+  ami                     = "${var.app_ec2_ami}"
+  availability_zone       = data.terraform_remote_state.shared_common_state.outputs.aws_azs
+  instance_type           = "t3.large"   
+  source_dest_check       = true
+  subnet_id               = data.terraform_remote_state.shared_common_state.outputs.subnet-main
+  vpc_security_group_ids  = [ data.terraform_remote_state.shared_common_state.outputs.sg-ssh ]
+  key_name                = "${var.key_name}"
+  iam_instance_profile = "${aws_iam_instance_profile.test_profile.name}"
+  
+  root_block_device {
+   volume_type            = "gp2"
+   volume_size            = "30"
+  }
+
+
+
+# Ansible requires Python to be installed on the remote machine as well as the local machine.
+  provisioner "remote-exec" {
+    inline                = ["sudo apt-get -qq install python -y"]
+  }
+
+ connection {
+    host                  = "${aws_instance.app.public_ip}"
+    type                  = "ssh"
+    user                  = "ubuntu"
+    private_key           = "${file(var.private_key)}"
+  }
+
+
+
+  tags = {
+    Name                  = "${var.environment}-${var.project_name}-ec2app01-app_ec2"
+    managed               = "terraform"
+    feature               = "${var.feature_name}"
+    project               = "${var.project_name}"
+    environment           = "${var.environment}"
+    application           = "ec2"
+  }
+
+
+}
+
+resource "aws_eip" "rd_eip" {
+     instance = "${aws_instance.app01.id}"
+}
+
+
+#############################################
+######                                 ######     
+######       Create S3 Bucket          ###### 
+######                                 ######
+#############################################
+
+resource "aws_s3_bucket" "test-storage" {
+  bucket = "test-storage"
+  acl    = "private"
+
+  tags = {
+    Name        = "test-storage"
+    Environment = "Dev"
+  }
+}
+
+
+#############################################
+######                                 ######
+######       Create IAM ROLE           ######                
+######                                 ######
+#############################################
+
+
+resource "aws_iam_role" "test_role" {
+  name = "test_role"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+
+  tags = {
+      tag-key = "tag-value"
+  }
+}
+
+
+#############################################
+######                                 ######
+######   Create IAM Instance Profile   ######
+######                                 ######
+#############################################
+
+
+resource "aws_iam_instance_profile" "test_profile" {
+  name = "test_profile"
+  role = "${aws_iam_role.test_role.name}"
+}
+
+
+#############################################
+######                                 ######
+######       Create IAM Policy         ######
+######                                 ######
+#############################################
+
+
+resource "aws_iam_role_policy" "test-policy" {
+  name = "test-policy"
+  role = "${aws_iam_role.test_role.id}"
+
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:Get*",
+                "s3:List*"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+EOF
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
